@@ -1,0 +1,141 @@
+---
+title: "Prediction Assigment over the Weight Lifting Exercises Dataset"
+author: "Francisco Alonso"
+date: "November 20, 2015"
+output: html_document
+---
+
+#Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset) [1].
+
+The 'Random Forest' model was used obtaining high accuracy for prediction over a test set of 20 records. The accuracy obtained is 0.993 under the test sub-set. This was achieved by training the 'Random Forest' model and applying the Cross-Validation method.
+
+#Loading the Data
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+```{r cache=TRUE, eval=F}
+  library(ggplot2)
+  library(caret)
+  library(dplyr)
+  library(parallel)
+  library(doParallel)
+  originalTrainingSet = read.csv("pml-training.csv", header = TRUE)
+```
+
+#Data Preprocessing
+
+The variables with missing values were removed along with variables that are not useful for the prediction process, this was done with the objective of improving the prediction outcome and reduce the amount of data present in the sets to decrease the execution time. The training set was divided in a sub training and sub testing set of 60% and 40% of the original training set respectively. The seed was set too for reproduciblity.
+
+```{r cache=TRUE, eval=F}
+  set.seed(42)
+  
+  na_count <-sapply(originalTrainingSet, function(y) sum(length(which(is.na(y) || y == ""))))
+  na_count <- data.frame(na_count)
+
+  naCols <-sapply(na_count, function(y) which(y > 0))
+  naCols <- data.frame(naCols)
+
+  trainingSet <- select(originalTrainingSet
+                        , - naCols[,1]
+                        , -X
+                        , -user_name
+                        , -raw_timestamp_part_1
+                        , -raw_timestamp_part_2
+                        , -num_window
+                        , -new_window
+                        , -cvtd_timestamp)
+  trainingSet$classe <- as.factor(trainingSet$classe)
+
+  trainIndex <- createDataPartition(trainingSet$classe, p=0.6,list=FALSE);
+  training <- trainingSet[trainIndex,]
+  testing <- trainingSet[-trainIndex,]
+```
+
+#Model Training
+
+The 'Random Forest' ("rf") model was tested and after finding the estimated set of useful variables for the prediction process that allowed an acceptable execution time, the importance of each was calculated to validate the estimate. The "doParallel" package was used to handle the high amount of data and computations performed. To avoid Over-Fitting the Cross Validation method with K=3 is used.
+
+```{r cache=TRUE, eval=F}
+  registerDoParallel(makeCluster(2))
+  
+  model_rf <- train(classe ~ .
+                   ,  method="rf"
+                   , data = training
+                   , allowParallel=T
+                   , trControl = trainControl(method = "cv", number = 3)
+                   ,importance=TRUE
+                   )
+```
+
+##Variable Importance
+
+The most important predictor variable from the cross-validated model is the "roll_belt".
+
+```{r cache=TRUE, eval=F}
+  varImportance = varImp(model_rf$finalModel)
+```
+
+    roll_belt            1242.83123
+    pitch_belt            543.99271
+    yaw_belt              635.44856
+    total_accel_belt       44.74292
+    gyros_belt_x           37.61024
+
+##Accuracy of the Model
+
+Making a predction over the testing sub-set the accuracy of the model can be obtained.
+
+```{r eval=F}
+  predTestingSubset <- predict(model_rf , testing)
+  confusionMatrix(predTestingSubset, testing$classe)
+```
+
+    Overall Statistics
+                                          
+               Accuracy : 0.993           
+                 95% CI : (0.9909, 0.9947)
+    No Information Rate : 0.2845          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9911          
+    Mcnemar's Test P-Value : NA              
+    Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+    Sensitivity            0.9991   0.9921   0.9920   0.9844   0.9931
+    Specificity            0.9979   0.9986   0.9971   0.9979   0.9998
+    Pos Pred Value         0.9946   0.9941   0.9862   0.9891   0.9993
+    Neg Pred Value         0.9996   0.9981   0.9983   0.9970   0.9984
+    Prevalence             0.2845   0.1935   0.1744   0.1639   0.1838
+    Detection Rate         0.2842   0.1919   0.1730   0.1614   0.1825
+    Detection Prevalence   0.2858   0.1931   0.1754   0.1631   0.1826
+    Balanced Accuracy      0.9985   0.9953   0.9945   0.9912   0.9965
+
+The resulting accuracy for this model was 0.993 on the testing sub-set.
+
+#Prediction Test - 20 test cases
+
+Last, the model is used to predict a test set of 20 elements, this file writer function was provided by the course instructors.
+
+```{r eval=F}
+  
+  pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+      filename = paste0("problem_id_",i,".txt")
+      write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+  }
+  
+  TestSet = read.csv("pml-testing.csv")
+  predictionTest <- predict(model_rf, TestSet)
+  pml_write_files(as.vector(predictionTest))
+```
+
+#References
+
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#wle_paper_section#ixzz3sCJ45xdG
